@@ -1,0 +1,841 @@
+---
+title: "Automatically Create Tables"
+---
+
+Overview:
+
+The main part of this script loops through a folder of CSV files containing the summarized results of multiple analyses for the Strengthening Democracy Challenge. It references a CSV file (called "Table Notes.csv") that contains a number of relevant parameters for each table (whether to split the table, title of table, any footnotes, etc.). The script formats each table into APA style, performs some additional functions (renames columns, converts p-values into APA format, etc.) and then spits out a Word doc whereby each table is separated by a page break.
+
+# Step 1: Load packages and functions
+```{r, echo=FALSE}
+pacman::p_load(pacman, officer, flextable, tidyverse, magrittr)
+
+# Function to convert empty values into "" and to make p-value column conform to apa conventions
+apa_conv <- function(data){
+  # these columns will only be altered if they are present in the data frame 
+  # convert NA's into empty values
+  data[is.na(data)] <- ""
+  # grab column names
+  three_dec <- data[,colnames(data)=="p"]
+  # convert 0s into <.001
+  three_dec[three_dec==0]<-"<.001"
+  # make 1s into 1.000
+  three_dec <- ifelse(three_dec=="1","1.000",three_dec)
+  # add a 0 if there are only 2 significant digits
+  three_dec <- ifelse(nchar(three_dec)==4,paste0(three_dec,"0"),three_dec)
+  # add two 0s if there is only 1 significant digit
+  three_dec <- ifelse(nchar(three_dec)==3,paste0(three_dec,"00"),three_dec)
+  # put the data back together
+  data[,colnames(data)=="p"] <- three_dec
+  return(data)
+}
+
+# Function to have tables autofit to page
+FitFlextableToPage <- function(ft, pgwidth = 6){
+  # set as autofit to make width parameters adjustable
+  ft_out <- ft %>% autofit()
+  # set width as function of page width
+  ft_out <- width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable_dim(ft_out)$widths))
+  return(ft_out)
+}
+```
+
+# Discrepancy between folders and Table Notes?
+```{r}
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Results")
+
+notes <- read.csv("Table Notes.csv")
+
+# Quickly make Table Notes.csv workable for the format guide by removing everything after the ":"
+for(i in 1:nrow(notes)){
+  a <- notes$Title[i]
+  a <- gsub("(:).*", "\\1", a)
+  notes$good_title[i] <- gsub(":", "", a)
+}
+
+real_names <- list.files()
+real_names <- real_names[-which(real_names=="Table Notes.csv")]
+real_names %<>% str_remove(".csv")
+
+setdiff(real_names, notes$good_title)
+# These files are not currently listed in the Table Notes.csv file but are found in the Final Results folder
+# "Table S13.2.1" "Table S13.2.2" "Table S13.2.3" "Table S13.2.4" "Table S13.2.5" "Table S13.2.6" "Table S13.2.7" "Table S14.1.2" "Table S9.3"  
+
+setdiff(notes$good_title, real_names)
+# This table is in Table Notes.csv but is NOT found in the Final Results folder
+
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Results")
+quick <- read.csv("Table S13.1.16.csv")
+mn <- round(quick, digits = 3)
+
+
+# remove .csv
+# tbl_name <- file_names[1] %>% str_remove(".csv")
+# which table is found in the good titles
+# tbl_index <- which(tbl_name %in% notes$good_title)
+
+```
+
+# Quickly test code on one table ~ aka my custom code to automatically create an APA table
+```{r, echo=FALSE}
+# Test Table
+
+knitr::opts_chunk$set(ft.keepnext = FALSE)
+
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Creating Tables")
+file_names <- list.files()
+df <- read.csv(file_names[1])
+df <- rbind(df, df, df, df, df)
+
+# initialize word doc
+doc <- read_docx()
+
+for(i in 1:ncol(df)){
+  colnames(df)[i] <- gsub("\\...", " ", colnames(df)[i])
+}
+
+# load data frame as the table variable
+table <- df
+
+footnote <- 1
+
+table <- flextable(table) %>%
+                           font(fontname = "Times New Roman", part = "all") %>%
+                           align(j = 2:length(df), align = "center", part = "all") %>%
+                           fontsize(size = 10, part = "all") %>%
+                           # This is where I will set the caption
+                           set_caption(caption = as_paragraph(as_chunk("Table 1.1: Kung Fu Panda", props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%
+                           border_remove() %>%
+                           hline_top(
+                               border = officer::fp_border(width = 1),
+                               part = "all") %>%
+                           hline_top(
+                               border = officer::fp_border(width = 0),
+                               part = "header") %>%
+                           hline_bottom(
+                               border = officer::fp_border(width = 1),
+                               part = "body") %>%
+                          # italicize the second and third column from the column names
+                          italic(i = NULL, j = c(2, 3), part = "header")
+
+if(footnote==1){
+  table %<>%
+        add_footer_lines(c("Notes. Checking this one out.", 
+                           "* p < .05, ** p < .01, *** p < .001")) %>%
+        font(fontname = "Times New Roman", part = "footer") %>%
+        fontsize(size = 10, part = "footer")
+}
+
+table <- FitFlextableToPage(table)
+# append table to doc
+doc <- body_add_flextable(doc, value = table)
+
+# save the word doc
+print(doc, target = "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Code Trials/check.docx")
+
+
+# Messing around with lm for quick reporting of model results
+# model <- lm(mpg ~ cyl + wt *hp, mtcars)
+# as.data.frame(summary(model)$coe)
+# 
+# df <- as.data.frame(summary(model)$coefficients)
+# `95% CI` <- NULL
+# ints <- round(confint(model), digits = 2)
+# for(i in 1:nrow(ints)){
+#   `95% CI`[i] <- paste0("[", ints[i, 1], ", " ,ints[i, 2], "]")
+# }
+# 
+# stats.table <- cbind(df, `95% CI`)
+```
+
+# Git 'er done
+
+# save valid table names
+```{r, warning=FALSE}
+# save valid Table Names
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Tables")
+file_names <- list.files()
+
+# Remove unnecessary tables and match the format of the tables with the ID column in Table Notes.csv
+# file_names <- gsub(" ", "", file_names)
+# file_names <- gsub("T", "t", file_names)
+
+bad <- grep("P", file_names)
+file_names <- file_names[-bad]
+file_names <- file_names[-which(file_names=="Table Notes.csv")]
+file_names <- file_names[-which(file_names=="Good Table Notes.csv")]
+
+file_names %<>% str_remove(".csv")
+
+# these tables will not be uploaded to the SM
+file_names <- file_names[-which(file_names%in%c("Table S9.4", "Table S9.5", "Table S9.6", "Table S9.7", "Table S9.8", "Table S9.9"))]
+
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC")
+write.csv(file_names, "table names.csv", row.names = FALSE)
+```
+
+# save where similar between old and new table notes
+```{r}
+# Names of the tables that exist in the folder
+names <- read.csv("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/table names.csv")
+# Old Table Notes guide
+old_notes <- read.csv("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Results/Old Table Notes.csv")
+# New Table Notes guide
+new_notes <- read.csv("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Tables/Table Notes.csv")
+
+# checking duplicates
+new_notes %>%
+  group_by(ID) %>%
+  dplyr::summarise(count = n()) %>% 
+  arrange(desc(count))
+
+# remove all duplicates
+new_notes <- new_notes %>% distinct(ID, .keep_all = T)
+
+# tables that don't have an ID row in Table Notes.csv
+setdiff(names[,1], new_notes$ID)
+# tables found in Table Notes.csv that do not exist in the folder
+setdiff(new_notes$ID, names[,1])
+
+
+# Match the parameters for the tables that I already have data
+for(i in 1:length(new_notes$ID)){
+  
+  if(new_notes$ID[i]%in%old_notes$ID){
+    new_notes[i, 1:5] <- old_notes[old_notes$ID==new_notes$ID[i], 1:5]
+  }
+  
+}
+
+# Save the good table notes
+write_csv(new_notes, "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Tables/Good Table Notes.csv")
+```
+
+
+# New Step 2: create tables
+```{r}
+## Create tables ##
+
+# set working directory here as the folder containing all the SDC results tables (ignore "Table Notes.csv"
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Tables")
+
+name_data <- read.csv("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/table names.csv")
+
+# For now lets only focus on unproblematic / not long tables
+name_data %<>% filter(x %in% c("Table S6.1","Table S6.2.1", "Table S6.2.2", "Table S6.2.3"))
+
+# Starting with the first 105 tables; will finish off with the final 104 (106-209) afterward
+file_names <- name_data[,1]
+
+# remove .csv from each name
+# file_names %<>% str_remove(".csv")
+
+# # FOR THE TEST TRIALS, WE WILL ONLY BE WORKING WITH 5 TABLES + table S6.1
+# set.seed(123)
+# file_names <- c(sample(file_names, 5), "Table S6.1")
+
+
+
+# read in format guide here
+format_guide <- read.csv("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Tables/Good Table Notes.csv")
+
+# Quickly make Table Notes.csv workable for the format guide by removing everything after the ":" in Title column
+for(i in 1:nrow(format_guide)){
+  a <- format_guide$Title[i]
+  a <- gsub("(:).*", "\\1", a)
+  format_guide$good_name[i] <- gsub(":", "", a)
+}
+
+
+
+# initialize word doc
+doc <- read_docx()
+
+# loop through table csv files
+for(j in 1:length(file_names)){
+  
+# read in the csv file
+temp <- read.csv(paste0(file_names[j], ".csv"))
+
+
+# convert to apa ~ turn p-values into apa-formatted p-values + make NAs in data frame blank
+temp <- apa_conv(temp)
+
+# format column titles
+colnames(temp)[colnames(temp)=="Cohens_d"] <- "Cohen's d"
+colnames(temp)[colnames(temp)=="p"] <- "p-value"
+colnames(temp)[colnames(temp)=="t"] <- "t-value"
+colnames(temp)[colnames(temp)=="Percentage.Outperformed.Interventions"] <- "% Outperformed Interventions"
+
+
+
+# replace any periods and underscores in the column names with spaces
+for(i in 1:ncol(temp)){
+  colnames(temp)[i] <- gsub("\\.", " ", colnames(temp)[i])
+  colnames(temp)[i] <- gsub("\\_", " ", colnames(temp)[i])
+}
+
+# These tables are S13.2.X but are not correlation matrices
+non_cormat_names <- c("Table S13.2.4", "Table S13.2.7")
+
+# Tables S13.2.X are all correlation matrices so we need to add a column for row names; however, ignore this for the two tables that are not correlation matrices
+if(grepl("Table S6.2.2", format_guide$good_name[format_guide$good_name==file_names[j]]) | grepl("Table S6.2.3", format_guide$good_name[format_guide$good_name==file_names[j]])){
+
+  # Row of DVs for the Correlation Matrix
+  DV <- c("PA", "SUP", "SPV", "SUC", "OBC", "SDTR", "SDTA", "BEPF", "PI7", "SPI", "IDEO", "IDEX")
+  
+  # Merge the names with the table
+  temp <- cbind(DV, temp)
+  
+  rm(DV)
+}
+
+if(grepl("Table S6.2.1", format_guide$good_name[format_guide$good_name==file_names[j]]) & !format_guide$good_name[format_guide$good_name==file_names[j]] %in% non_cormat_names){
+
+  # Row of DVs for the Correlation Matrix
+  DV <- c("PA", "SUP", "SPV", "SUC", "OBC", "SDTR", "SDTA", "BEPF", "PI", "PI7", "SPI", "IDEO", "IDEX")
+  
+  # Merge the names with the table
+  temp <- cbind(DV, temp)
+  
+  rm(DV)
+}
+
+
+# set maximum number of columns we want for each table
+goal <- format_guide$goal_col[format_guide$good_name==file_names[j]]
+
+# Do we have footnotes to add? 0 = no; 1 = yes
+footnote <- format_guide$footnote[format_guide$good_name==file_names[j]]
+
+# Do we need to retain the first column? 0 = no; 1 = yes
+retain_first_col <- format_guide$retain_first_col[format_guide$good_name==file_names[j]]
+
+
+# If table has more than the maximum number of columns...
+if(ncol(temp)>goal){
+
+  # ...figure out how many times we will split the column
+  split_num <- ceiling(ncol(temp)/goal)
+  
+  # If we need to retain the first column every time it's split then what we will do to calculate split_num is subtract our total number
+  # of columns by 1 (since we don't want to consider the title column). We will then look at the goal max number of columns per split
+  # and subtract by 1 (since each split will contain the title column, we have to always take away that spot as an available spot).
+  # Lastly, we will consider how many times we need need to split the remaining N - 1 columns given that we have goal/max - 1 columns available
+  # for each split. For example, 15 columns with a max column number of 5 means we need to split the table 4 times since ceiling(14/4) = 4.
+  if(retain_first_col==1){
+    # How many columns do we have besides the title column
+    num_cols <- ncol(temp) - 1
+    # How many available columns do we have per split
+    avail_col <- goal - 1
+    # Figure out how many times we need to split
+    split_num <- ceiling(num_cols/avail_col)
+  }
+
+  
+  # set cur and index
+  cur <- 0
+  index <- 1
+  # loop through table columns, grabbing the columns we want by the range goal (set via 'goal' variable)
+  while(cur < split_num){
+
+        # If we aren't on the last section of table columns...
+        if(cur!=split_num-1){
+          
+          # Check if we need to retain the first column for each split
+          if(retain_first_col==1){
+                # if we just started the split...
+                if(index==1){
+                        # then index like normal
+                        # index tables from index + range of columns we want to keep 
+                        table <- temp[,index:(index+goal-1)]
+                }else{
+                        # but if not then index we need to grab the first column along with max # of columns allowed per split - 1
+                        # index tables from index + range of columns we want to keep 
+                        table <- temp[,c(1, index:(index+goal-2))]
+                        }
+                
+          }else{
+            # if we don't need to retain the first column for each split, then just split like normal
+            # index tables from index + range of columns we want to keep 
+            table <- temp[,index:(index+goal-1)]
+          }
+          
+          
+          # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+          ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+                 center_range <- 2:ncol(table),
+                 center_range <- 1:ncol(table))
+          
+          # create the table and set caption as name of csv file but omit ".csv"
+          table <- flextable(table) %>%
+                                    font(fontname = "Times New Roman", part = "all") %>%
+                                    # We want all but the intervention/DV names to be centered
+                                    align(j = center_range, align = "center", part = "body") %>%
+                                    # However, we want all the column names to be centered
+                                    align(j = 1:ncol(table), align = "center", part = "header") %>%
+                                    fontsize(size = 10, part = "all") %>% 
+                                    set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%
+                                    border_remove() %>%
+                                    hline_top(
+                                       border = officer::fp_border(width = 1),
+                                       part = "all") %>%
+                                    hline_top(
+                                       border = officer::fp_border(width = 0),
+                                       part = "header") %>%
+                                    hline_bottom(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all")
+          
+          # If there is a footnote, add it (might remove this so that only the last section of the table contains the footnotes)
+          if(footnote==1){
+              table %<>% 
+              add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+              font(fontname = "Times New Roman", part = "footer") %>% 
+              fontsize(size = 10, part = "footer")
+            }
+          
+          # autofit table to page
+          table <- FitFlextableToPage(table)
+          # append table to doc
+          doc <- body_add_flextable(doc, value = table)
+          # add a page break to the doc after each table
+          doc <- body_add_break(doc)
+      
+      }else{
+          
+          # If we've been retaining the first column...
+          if(retain_first_col==1){
+            # ... then retain the first column and grab the remaining columns we haven't added yet
+            table <- temp[,c(1, index:ncol(temp))]
+          }else{
+              # ... if we haven't been retaining the first column then create table as usual
+              # since we are on the ast section, then index up until the end of the columns we have
+              table <- temp[,index:ncol(temp)]
+              }
+        
+
+          # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+          ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+                 center_range <- 2:ncol(table),
+                 center_range <- 1:ncol(table))
+          
+          # create the table and set caption as name of csv file but omit ".csv"
+          table <- flextable(table) %>% 
+                                    font(fontname = "Times New Roman", part = "all") %>% 
+                                    # We want all but the intervention/DV names to be centered
+                                    align(j = center_range, align = "center", part = "body") %>%
+                                    # However, we want all the column names to be centered
+                                    align(j = 1:ncol(table), align = "center", part = "header") %>%
+                                    fontsize(size = 10, part = "all") %>% 
+                                    set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%                           
+                                    border_remove() %>% 
+                                    hline_top(
+                                       border = officer::fp_border(width = 1),
+                                       part = "all") %>%
+                                    hline_top(
+                                       border = officer::fp_border(width = 0),
+                                       part = "header") %>%
+                                    hline_bottom(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all")
+          
+          # If there is a footnote, add it
+          if(footnote==1){
+              table %<>% 
+              add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+              font(fontname = "Times New Roman", part = "footer") %>% 
+              fontsize(size = 10, part = "footer")
+            }
+          
+          # autofit table to page
+          table <- FitFlextableToPage(table)
+          # append table to doc
+          doc <- body_add_flextable(doc, value = table)
+          # add a page break to the doc after each table
+          doc <- body_add_break(doc)
+          
+        }
+        
+        
+        # if we've been retaining the first column
+        if(retain_first_col==1){
+                # are we still on the first split of the table?
+                if(index==1){
+                  # ... if so, then we will index from goal + 1
+                  index <- index + goal
+                  }else{
+                  # ... if not, then the index will correct for the title column
+                  index <- index + goal - 1 
+                  }
+                
+        }else{
+          # if we haven't been retaining the first column, then set index to be index + how many columns were added
+          index <- index + goal
+        }
+    
+        cur <- cur + 1
+        # end of while loop
+  }
+  
+  }else{
+    
+    
+    # If table has less than max number of columns then just add to doc as is
+    table <- temp
+    
+    # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+    ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+     center_range <- 2:ncol(table),
+     center_range <- 1:ncol(table))
+
+    # create the table and set caption as name of csv file but omit ".csv"
+    table <- flextable(table) %>% 
+                              font(fontname = "Times New Roman", part = "all") %>% 
+                              # We want all but the intervention/DV names to be centered
+                              align(j = center_range, align = "center", part = "body") %>%
+                              # However, we want all the column names to be centered
+                              align(j = 1:ncol(table), align = "center", part = "header") %>%
+                              fontsize(size = 10, part = "all") %>% 
+                              set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%                              
+                              border_remove() %>% 
+                              hline_top(
+                               border = officer::fp_border(width = 1),
+                               part = "all") %>%
+                              hline_top(
+                               border = officer::fp_border(width = 0),
+                               part = "header") %>%
+                              hline_bottom(
+                                  border = officer::fp_border(width = 1),
+                                  part = "all")
+    
+    # If there is a footnote, add it
+    if(footnote==1){
+        table %<>% 
+        add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+        font(fontname = "Times New Roman", part = "footer") %>% 
+        fontsize(size = 10, part = "footer")}
+    
+    # autofit table to page
+    table <- FitFlextableToPage(table)
+    # append table to doc
+    doc <- body_add_flextable(doc, value = table)
+    # add a page break to the doc after each table
+    doc <- body_add_break(doc)
+
+}
+  
+}
+
+# save the word doc
+# print(doc, target = "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Code Trials/Final SDC Tables.docx")
+# print(doc, target = "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Code Trials/Final SDC Tables 2.docx")
+print(doc, target = "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Code Trials/Final SDC Tables 3.docx")
+
+# let me know when this is done
+beepr::beep(sound = 8)
+```
+
+
+
+
+
+# Old Step 2: create tables
+```{r}
+## Create tables ##
+
+# set working directory here as the folder containing all the SDC results tables (ignore "Table Notes.csv"
+setwd("/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Final Results")
+
+### For this folder, on March 13, I renamed "Table Notes" to "Old Table
+
+# hard coding file names since even using gtools::mixedsort won't properly sort the tables with two periods (e.g., 10.1.2 needs to go before 10.1.10)
+file_names <- c("Table S3.1.csv", "Table S3.2.csv", "Table S6.1.csv", "Table S6.2.csv", "Table S6.3.csv","Table S6.4.csv", "Table S7.1.csv", "Table S7.2.csv", "Table S7.3.csv", "Table S8.1.csv", "Table S8.2.csv", "Table S8.3.csv", "Table S8.4.csv", "Table S8.5.csv", "Table S8.6.csv", "Table S8.7.csv", "Table S8.8.csv", "Table S8.9.csv", "Table S8.10.csv", "Table S8.11.csv", "Table S8.12.csv", "Table S8.13.csv", "Table S9.1.csv", "Table S9.2.csv", "Table S9.3.csv", "Table S10.1.1.csv", "Table S10.1.2.csv", "Table S10.1.3.csv", "Table S10.1.4.csv", "Table S10.1.5.csv", "Table S10.1.6.csv", "Table S10.1.7.csv", "Table S10.1.8.csv", "Table S10.1.9.csv", "Table S10.1.10.csv", "Table S10.2.1.csv", "Table S10.2.2.csv", "Table S10.2.3.csv", "Table S10.2.4.csv", "Table S10.2.5.csv", "Table S10.2.6.csv", "Table S10.2.7.csv", "Table S10.2.8.csv", "Table S10.2.9.csv", "Table S13.1.1.csv", "Table S13.1.2.csv", "Table S13.1.3.csv",  "Table S13.1.4.csv", "Table S13.1.5.csv", "Table S13.1.6.csv",  "Table S13.1.7.csv",  "Table S13.1.8.csv", "Table S13.1.9.csv", "Table S13.1.10.csv", "Table S13.1.11.csv", "Table S13.1.12.csv", "Table S13.1.13.csv", "Table S13.1.14.csv", "Table S13.1.15.csv", "Table S13.1.16.csv", "Table S13.1.17.csv", "Table S13.1.18.csv", "Table S13.1.19.csv", "Table S13.1.20.csv", "Table S13.1.21.csv", "Table S13.1.22.csv", "Table S13.1.23.csv", "Table S13.1.24.csv", "Table S13.1.25.csv", "Table S13.2.1.csv", "Table S13.2.2.csv", "Table S13.2.3.csv", "Table S13.2.4.csv",  "Table S13.2.5.csv",  "Table S13.2.6.csv",  "Table S13.2.7.csv", "Table S14.1.1.csv", "Table S14.1.2.csv", "Table S14.2.csv",  "Table S14.3.csv", "Table S14.4.csv", "Table S14.5.csv",  "Table S14.6.csv")
+
+# remove .csv from each name
+file_names %<>% str_remove(".csv")
+
+
+# # FOR THE TEST TRIALS, WE WILL ONLY BE WORKING WITH 5 TABLES + table S6.1
+# set.seed(123)
+# file_names <- c(sample(file_names, 5), "Table S6.1")
+
+
+
+# read in format guide here
+format_guide <- read.csv("Table Notes.csv")
+
+# Quickly make Table Notes.csv workable for the format guide by removing everything after the ":" in Title column
+for(i in 1:nrow(format_guide)){
+  a <- format_guide$Title[i]
+  a <- gsub("(:).*", "\\1", a)
+  format_guide$good_name[i] <- gsub(":", "", a)
+}
+
+
+
+# initialize word doc
+doc <- read_docx()
+
+# loop through table csv files
+for(j in 1:length(file_names)){
+  
+# read in the csv file
+temp <- read.csv(paste0(file_names[j], ".csv"))
+
+
+# convert to apa ~ turn p-values into apa-formatted p-values + make NAs in data frame blank
+temp <- apa_conv(temp)
+
+# format column titles
+colnames(temp)[colnames(temp)=="Cohens_d"] <- "Cohen's d"
+colnames(temp)[colnames(temp)=="p"] <- "p-value"
+colnames(temp)[colnames(temp)=="t"] <- "t-value"
+colnames(temp)[colnames(temp)=="Percentage.Outperformed.Interventions"] <- "% Outperformed Interventions"
+
+
+
+# replace any periods and underscores in the column names with spaces
+for(i in 1:ncol(temp)){
+  colnames(temp)[i] <- gsub("\\.", " ", colnames(temp)[i])
+  colnames(temp)[i] <- gsub("\\_", " ", colnames(temp)[i])
+}
+
+# Tables S13.2.X are all correlation matrices so we need to add a column for row names
+if(grepl("Table S13.2", format_guide$good_name[format_guide$good_name==file_names[j]])){
+  
+  # Row of DVs for the Correlation Matrix
+  DV <- c("Partisan Animosity",	"Support for Undemocratic Practices",	"Support for Partisan Violence",	"Support for Undemocratic Candidates",	"Opposition to Bipartisan Cooperation",	"Social Distrust",	"Social Distance",	"Biased Evaluation of Politicized Facts")
+  
+  # Merge the names with the table
+  temp <- cbind(DV, temp)
+  
+  rm(DV)
+}
+
+# set maximum number of columns we want for each table
+goal <- format_guide$goal_col[format_guide$good_name==file_names[j]]
+
+# Do we have footnotes to add? 0 = no; 1 = yes
+footnote <- format_guide$footnote[format_guide$good_name==file_names[j]]
+
+# Do we need to retain the first column? 0 = no; 1 = yes
+retain_first_col <- format_guide$retain_first_col[format_guide$good_name==file_names[j]]
+
+
+# If table has more than the maximum number of columns...
+if(ncol(temp)>goal){
+
+  # ...figure out how many times we will split the column
+  split_num <- ceiling(ncol(temp)/goal)
+  
+  # If we need to retain the first column every time it's split then what we will do to calculate split_num is subtract our total number
+  # of columns by 1 (since we don't want to consider the title column). We will then look at the goal max number of columns per split
+  # and subtract by 1 (since each split will contain the title column, we have to always take away that spot as an available spot).
+  # Lastly, we will consider how many times we need need to split the remaining N - 1 columns given that we have goal/max - 1 columns available
+  # for each split. For example, 15 columns with a max column number of 5 means we need to split the table 4 times since ceiling(14/4) = 4.
+  if(retain_first_col==1){
+    # How many columns do we have besides the title column
+    num_cols <- ncol(temp) - 1
+    # How many available columns do we have per split
+    avail_col <- goal - 1
+    # Figure out how many times we need to split
+    split_num <- ceiling(num_cols/avail_col)
+  }
+
+  
+  # set cur and index
+  cur <- 0
+  index <- 1
+  # loop through table columns, grabbing the columns we want by the range goal (set via 'goal' variable)
+  while(cur < split_num){
+
+        # If we aren't on the last section of table columns...
+        if(cur!=split_num-1){
+          
+          # Check if we need to retain the first column for each split
+          if(retain_first_col==1){
+                # if we just started the split...
+                if(index==1){
+                        # then index like normal
+                        # index tables from index + range of columns we want to keep 
+                        table <- temp[,index:(index+goal-1)]
+                }else{
+                        # but if not then index we need to grab the first column along with max # of columns allowed per split - 1
+                        # index tables from index + range of columns we want to keep 
+                        table <- temp[,c(1, index:(index+goal-2))]
+                        }
+                
+          }else{
+            # if we don't need to retain the first column for each split, then just split like normal
+            # index tables from index + range of columns we want to keep 
+            table <- temp[,index:(index+goal-1)]
+          }
+          
+          
+          # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+          ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+                 center_range <- 2:ncol(table),
+                 center_range <- 1:ncol(table))
+          
+          # create the table and set caption as name of csv file but omit ".csv"
+          table <- flextable(table) %>%
+                                    font(fontname = "Times New Roman", part = "all") %>%
+                                    # We want all but the intervention/DV names to be centered
+                                    align(j = center_range, align = "center", part = "body") %>%
+                                    # However, we want all the column names to be centered
+                                    align(j = 1:ncol(table), align = "center", part = "header") %>%
+                                    fontsize(size = 10, part = "all") %>% 
+                                    set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%
+                                    border_remove() %>% 
+                                    hline_top(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all") %>% 
+                                    hline_bottom(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all")
+          
+          # If there is a footnote, add it (might remove this so that only the last section of the table contains the footnotes)
+          if(footnote==1){
+              table %<>% 
+              add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+              font(fontname = "Times New Roman", part = "footer") %>% 
+              fontsize(size = 10, part = "footer")
+            }
+          
+          # autofit table to page
+          table <- FitFlextableToPage(table)
+          # append table to doc
+          doc <- body_add_flextable(doc, value = table)
+          # add a page break to the doc after each table
+          doc <- body_add_break(doc)
+      
+      }else{
+          
+          # If we've been retaining the first column...
+          if(retain_first_col==1){
+            # ... then retain the first column and grab the remaining columns we haven't added yet
+            table <- temp[,c(1, index:ncol(temp))]
+          }else{
+              # ... if we haven't been retaining the first column then create table as usual
+              # since we are on the ast section, then index up until the end of the columns we have
+              table <- temp[,index:ncol(temp)]
+              }
+        
+
+          # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+          ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+                 center_range <- 2:ncol(table),
+                 center_range <- 1:ncol(table))
+          
+          # create the table and set caption as name of csv file but omit ".csv"
+          table <- flextable(table) %>% 
+                                    font(fontname = "Times New Roman", part = "all") %>% 
+                                    # We want all but the intervention/DV names to be centered
+                                    align(j = center_range, align = "center", part = "body") %>%
+                                    # However, we want all the column names to be centered
+                                    align(j = 1:ncol(table), align = "center", part = "header") %>%
+                                    fontsize(size = 10, part = "all") %>% 
+                                    set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%                           
+                                    border_remove() %>% 
+                                    hline_top(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all") %>% 
+                                    hline_bottom(
+                                        border = officer::fp_border(width = 1),
+                                        part = "all")
+          
+          # If there is a footnote, add it
+          if(footnote==1){
+              table %<>% 
+              add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+              font(fontname = "Times New Roman", part = "footer") %>% 
+              fontsize(size = 10, part = "footer")
+            }
+          
+          # autofit table to page
+          table <- FitFlextableToPage(table)
+          # append table to doc
+          doc <- body_add_flextable(doc, value = table)
+          # add a page break to the doc after each table
+          doc <- body_add_break(doc)
+          
+        }
+        
+        
+        # if we've been retaining the first column
+        if(retain_first_col==1){
+                # are we still on the first split of the table?
+                if(index==1){
+                  # ... if so, then we will index from goal + 1
+                  index <- index + goal
+                  }else{
+                  # ... if not, then the index will correct for the title column
+                  index <- index + goal - 1 
+                  }
+                
+        }else{
+          # if we haven't been retaining the first column, then set index to be index + how many columns were added
+          index <- index + goal
+        }
+    
+        cur <- cur + 1
+        # end of while loop
+  }
+  
+  }else{
+    
+    
+    # If table has less than max number of columns then just add to doc as is
+    table <- temp
+    
+    # center every column of the table, except the first column if it contains the name of the intervention/outcome/DV
+    ifelse(any(c("Intervention", "Outcome", "Condition", "Variable", "Effect", "Characteristic") %in% colnames(table)[1]),
+     center_range <- 2:ncol(table),
+     center_range <- 1:ncol(table))
+
+    # create the table and set caption as name of csv file but omit ".csv"
+    table <- flextable(table) %>% 
+                              font(fontname = "Times New Roman", part = "all") %>% 
+                              # We want all but the intervention/DV names to be centered
+                              align(j = center_range, align = "center", part = "body") %>%
+                              # However, we want all the column names to be centered
+                              align(j = 1:ncol(table), align = "center", part = "header") %>%
+                              fontsize(size = 10, part = "all") %>% 
+                              set_caption(caption = as_paragraph(as_chunk(format_guide$Title[format_guide$good_name==file_names[j]], props = fp_text(font.size = 10, font.family = "Times New Roman"))), fp_p = fp_par(text.align = "left", padding.left = 14), align_with_table = FALSE) %>%                              
+                              border_remove() %>% 
+                              hline_top(
+                                  border = officer::fp_border(width = 1),
+                                  part = "all") %>% 
+                              hline_bottom(
+                                  border = officer::fp_border(width = 1),
+                                  part = "all")
+    
+    # If there is a footnote, add it
+    if(footnote==1){
+        table %<>% 
+        add_footer_lines(format_guide$Notes[format_guide$good_name==file_names[j]]) %>% 
+        font(fontname = "Times New Roman", part = "footer") %>% 
+        fontsize(size = 10, part = "footer")}
+    
+    # autofit table to page
+    table <- FitFlextableToPage(table)
+    # append table to doc
+    doc <- body_add_flextable(doc, value = table)
+    # add a page break to the doc after each table
+    doc <- body_add_break(doc)
+
+}
+  
+}
+
+# save the word doc
+print(doc, target = "/Users/ighezea/Library/CloudStorage/OneDrive-Personal/PASCL/SDC/Code Trials/All SDC Tables.docx")
+
+# let me know when this is done
+beepr::beep(sound = 8)
+```
+
+
+
+

@@ -1,0 +1,1 @@
+{"frames":[{"func":"data.frame(Var1 = rnorm(8), Var2 = rnorm(8), Var3 = rnorm(8), \n    Var4 = rnorm(8), Var5 = rnorm(8), )","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error in data.frame(Var1 = rnorm(8), Var2 = rnorm(8), Var3 = rnorm(8),  : \n  argument is missing, with no default\n"}

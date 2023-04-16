@@ -1,0 +1,11 @@
+"0"," data.frame(
+  ""Var1"" = rnorm(8),
+  ""Var2"" = rnorm(8),
+  ""Var3"" = rnorm(8),
+  ""Var4"" = rnorm(8),
+  ""Var5"" = rnorm(8),
+)
+"
+"2","Error in data.frame(Var1 = rnorm(8), Var2 = rnorm(8), Var3 = rnorm(8),  : 
+  argument is missing, with no default
+"
